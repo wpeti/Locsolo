@@ -96,23 +96,6 @@ void setup() {
   serverSetup();
 }
 
-void sendLoginHtml(WiFiClient client) {
-  // send a standard http response header
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html");
-  client.println("Connection: close");  // the connection will be closed after completion of the response
-  client.println();
-  client.println("<!DOCTYPE HTML>");
-  client.println("<html>");
-  client.println("<div style=\"width:200px; height:1000px>\"");
-  client.print("<form action=\"\" method=\"POST\">");
-  client.println("<input type=\"password\" placeholder=\"Enter Password\" name=\"psw\" required>");
-  client.println("<button type=\"submit\">Login</button>");
-  client.print("</form>");
-  client.println("</div>");
-  client.println("</html>");
-}
-
 void sendControlsHtml(WiFiClient client)
 {
   // send a standard http response header
@@ -222,16 +205,8 @@ void loop() {
 
             reactOnClientResponse(postResp, clientResp, client);
           }
-
-          //if client has a session open
-          //if (hasSessionOpen(clientResp))
-          //{
+         
           sendControlsHtml(client);
-          //}
-          /*else //ask for authentication
-            {
-            sendLoginHtml(client);
-            }*/
 
           Serial.println("received: ");
           Serial.println(clientResp);
