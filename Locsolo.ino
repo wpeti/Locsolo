@@ -209,8 +209,11 @@ bool checkTickEnds()
   unsigned long now = millis();
   for (int i = 0; i < 7; i++)
   {
-    if (pinEndTicks[i] >= now)
+    if (pinEndTicks[i] <= now)
     {
+      Serial.print("Timespan ended on pin ");
+      Serial.print(pinNbrs[i]);
+      Serial.println(". ");
       tickEndedForPin = true;
       setPinLow(pinNbrs[i]);
       pinEndTicks[i] = 0;
