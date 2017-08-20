@@ -1,13 +1,20 @@
 #include <ESP8266WiFi.h>
 //#include <SPI.h>
-
+/*
+   Set time: (store current ticks pluss received ticks)
+    - Check if sum time is more then uLong
+      - If sum is more then uLong, reset system ticks
+      - If there were previously stored "pinEndTicks", recalculate those with the reseted system ticks
+*/
 ///////////////////////D1, D2, D3, D4, D5, D6, D7
 const byte pinNbrs[] = {5, 4, 0, 2, 14, 12, 13}; //D3(0) and D4(2) are blinking on reset -- 15(D8) is the "is wifi connected indicator"
 const String pinTexts[] = {"Ajtó előtt (D1)", "Járólap mellett (D2)", "nemtudni - nagy (D3)", "Tuják alatt (D4)", "nemtudni - nagy (D5)", "Rózsák, parik (D6)", "Csöpögő (D7)"};
+unsigned long pinEndTicks[] = {0, 0, 0, 0, 0, 0, 0};
 
 const char* ssid = "OpenWrt_w";      // your network SSID (name)
 const char* password = "W2nkl3r.";   // your network password
 int keyIndex = 0;                 // your network key Index number (needed only for WEP)
+bool wasWifiConnected = false;
 
 // NETWORK: Static IP details...
 IPAddress ip(192, 168, 1, 202);
@@ -51,24 +58,54 @@ void setPinLow(int pinNbr) {
   digitalWrite(pinNbr, LOW);
 }
 
+void resetPinEndTick(int pinNbr) {
+  for (int i = 0; i < 7; i++) {
+    if (pinNbrs[i] == pinNbr) pinEndTicks[i] = 0;
+  }
+}
+
+void calculateAndSetEndTick(int pinNbr, unsigned long timeSpan) {
+  for (int i = 0; i < 7; i++) {
+    if (pinNbrs[i] == pinNbr) pinEndTicks[i] = millis() + timeSpan; //implement variable overflow logic
+  }
+}
+
+//set pin low and reset pinEndTick for the pin
+void abortPin(int pinNbr) {
+  setPinLow(pinNbr);
+  resetPinEndTick(pinNbr);
+}
+
+//set pin high and set pinEndTick
+void schedulePin(int pinNbr, unsigned long timeSpan) {
+  setPinHigh(pinNbr);
+  calculateAndSetEndTick(pinNbr, timeSpan);
+}
+
 void serverSetup()
 {
   //start UART and the server
   server.begin();
   server.setNoDelay(true);
-  printWifiStatus();
+  //printWifiStatus();
 }
 bool checkIfWifiConnected() //true if connected
 {
   bool isConnected = (WiFi.status() == WL_CONNECTED && 0 > WiFi.RSSI() && WiFi.RSSI() > -93); //below -93dBm the connection is unrelyable
 
   if (isConnected) {
-    Serial.print("Wifi Connected...");
-    setPinHigh(15);
+    //if (!wasWifiConnected)
+    {
+      Serial.print("Wifi Connected...");
+      //UNCOMMENT THIS line!!
+      setPinHigh(15); 
+      wasWifiConnected = true;
+    }
   }
   else {
     Serial.print("Wifi not yet connected... ["); Serial.print(WiFi.RSSI()); Serial.print(" dBm]");
     setPinLow(15);
+    wasWifiConnected = false;
   }
 
   return isConnected;
@@ -116,22 +153,31 @@ void sendControlsHtml(WiFiClient client)
     client.print(pinTexts[i]);
     client.print(" - pin ");
     client.print(pinNbrs[i]);
-    client.print(". is ");
-    if (sensorReading) client.print("ON");
-    else if (!sensorReading) client.print("OFF");
+    client.print(".");
+
     client.print("<form action=\"\" method=\"POST\">");
     client.print("<button name=\"pinNbr\" value=\"");
     client.print(pinNbrs[i]);
-    client.print("\">Kapcsold</button>");
+    if (sensorReading)
+    {
+      client.print("\">Abort</button>");
+      /*
+         client.print(" Remaining time: ");
+         client.print("12");
+         client.print(" minute(s).");
+      */
+    }
+    else if (!sensorReading)
+    {
+      client.print("\">Schedule</button>");
+      client.print(" <input type=\"number\" name=\"timeSpan\" min=\"1\" max=\"60\" value=\"15\">");
+      client.print(" minute.");
+    }
     client.print("</form>");
     client.println("<br />");
   }
   client.println("</div>");
   client.println("</html>");
-}
-
-bool hasSessionOpen(String clientResp) {
-  return false;
 }
 
 void reactOnClientResponse(String postResp, String clientResp, WiFiClient client) {
@@ -147,22 +193,31 @@ void reactOnClientResponse(String postResp, String clientResp, WiFiClient client
     //Change pin status
     if (digitalRead(pinNumber))
     {
-      setPinLow(pinNumber);
+      abortPin(pinNumber);
     }
     else
     {
-      setPinHigh(pinNumber);
+      schedulePin(pinNumber, 10000);
+    }
+  }
+}
+
+bool checkTickEnds()
+{
+  bool tickEndedForPin = false;
+
+  unsigned long now = millis();
+  for (int i = 0; i < 7; i++)
+  {
+    if (pinEndTicks[i] >= now)
+    {
+      tickEndedForPin = true;
+      setPinLow(pinNbrs[i]);
+      pinEndTicks[i] = 0;
     }
   }
 
-  //check if authentication status shall change
-  Serial.print("checking pwd: ");
-  Serial.println(postResp);
-  if (postResp.indexOf("psw=Esikeso312%2C") >= 0) {
-    Serial.println("authenticated");
-    //set authentication status for this IP for 5 minutes
-  }
-
+  return tickEndedForPin;
 }
 
 void loop() {
@@ -205,7 +260,7 @@ void loop() {
 
             reactOnClientResponse(postResp, clientResp, client);
           }
-         
+
           sendControlsHtml(client);
 
           Serial.println("received: ");
@@ -228,6 +283,11 @@ void loop() {
     // close the connection:
     client.stop();
     Serial.println("client disonnected");
+  }
+
+  if (checkTickEnds())
+  {
+    //sendControlsHtml(client);
   }
 
   server.stop();
