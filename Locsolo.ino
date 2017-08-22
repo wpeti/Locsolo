@@ -1,15 +1,13 @@
 #include <ESP8266WiFi.h>
 //#include <SPI.h>
-/*
-   Set time: (store current ticks pluss received ticks)
-    - Check if sum time is more then uLong
-      - If sum is more then uLong, reset system ticks
-      - If there were previously stored "pinEndTicks", recalculate those with the reseted system ticks
-*/
+
 ///////////////////////D1, D2, D3, D4, D5, D6, D7
 const byte pinNbrs[] = {5, 4, 0, 2, 14, 12, 13}; //D3(0) and D4(2) are blinking on reset -- 15(D8) is the "is wifi connected indicator"
 const String pinTexts[] = {"Ajtó előtt (D1)", "Járólap mellett (D2)", "nemtudni - nagy (D3)", "Tuják alatt (D4)", "nemtudni - nagy (D5)", "Rózsák, parik (D6)", "Csöpögő (D7)"};
-unsigned long pinEndTicks[] = {0, 0, 0, 0, 0, 0, 0};
+
+unsigned long pinTicksSpan[] = {0, 0, 0, 0, 0, 0, 0};
+unsigned long pinTicksSpanSetTime[] = {0, 0, 0, 0, 0, 0, 0};
+
 
 const char* ssid = "OpenWrt_w";      // your network SSID (name)
 const char* password = "W2nkl3r.";   // your network password
@@ -58,28 +56,34 @@ void setPinLow(int pinNbr) {
   digitalWrite(pinNbr, LOW);
 }
 
-void resetPinEndTick(int pinNbr) {
+void resetPinSpanAndSetTicks(int pinNbr) {
   for (int i = 0; i < 7; i++) {
-    if (pinNbrs[i] == pinNbr) pinEndTicks[i] = 0;
+    if (pinNbrs[i] == pinNbr) {
+      pinTicksSpanSetTime[i] = 0;
+      pinTicksSpan[i] = 0;
+    }
   }
 }
 
-void calculateAndSetEndTick(int pinNbr, unsigned long timeSpan) {
+void setSpanAndSetTick(int pinNbr, unsigned long timeSpan) {
   for (int i = 0; i < 7; i++) {
-    if (pinNbrs[i] == pinNbr) pinEndTicks[i] = millis() + timeSpan; //implement variable overflow logic
+    if (pinNbrs[i] == pinNbr) {
+      pinTicksSpan[i] = timeSpan;
+      pinTicksSpanSetTime[i] = millis();
+    }
   }
 }
 
 //set pin low and reset pinEndTick for the pin
 void abortPin(int pinNbr) {
   setPinLow(pinNbr);
-  resetPinEndTick(pinNbr);
+  resetPinSpanAndSetTicks(pinNbr);
 }
 
 //set pin high and set pinEndTick
 void schedulePin(int pinNbr, unsigned long timeSpan) {
   setPinHigh(pinNbr);
-  calculateAndSetEndTick(pinNbr, timeSpan);
+  setSpanAndSetTick(pinNbr, timeSpan);
 }
 
 void serverSetup()
@@ -98,7 +102,7 @@ bool checkIfWifiConnected() //true if connected
     {
       Serial.print("Wifi Connected...");
       //UNCOMMENT THIS line!!
-      setPinHigh(15); 
+      setPinHigh(15);
       wasWifiConnected = true;
     }
   }
@@ -186,9 +190,13 @@ void reactOnClientResponse(String postResp, String clientResp, WiFiClient client
   {
     //parse pin number to change
     String substr = postResp.substring(postResp.indexOf("pinNbr=") + 7);
+    Serial.print("Substr value: ");
+    Serial.println(substr);
     int pinNumber = substr.toInt();
     Serial.print("Pin number received: ");
     Serial.println(pinNumber);
+
+    //implement time span parsing
 
     //Change pin status
     if (digitalRead(pinNumber))
@@ -202,21 +210,24 @@ void reactOnClientResponse(String postResp, String clientResp, WiFiClient client
   }
 }
 
-bool checkTickEnds()
+bool checkIfTicksJustEnded()
 {
   bool tickEndedForPin = false;
 
   unsigned long now = millis();
   for (int i = 0; i < 7; i++)
   {
-    if (pinEndTicks[i] <= now)
-    {
-      Serial.print("Timespan ended on pin ");
-      Serial.print(pinNbrs[i]);
-      Serial.println(". ");
-      tickEndedForPin = true;
-      setPinLow(pinNbrs[i]);
-      pinEndTicks[i] = 0;
+    if ( pinTicksSpan[i] != 0 && pinTicksSpanSetTime[i] != 0) {
+      if (now - pinTicksSpanSetTime[i] >= pinTicksSpan[i])
+      {
+        Serial.print("Timespan ended on pin ");
+        Serial.print(pinNbrs[i]);
+        Serial.println(". ");
+        tickEndedForPin = true;
+        setPinLow(pinNbrs[i]);
+        pinTicksSpan[i] = 0;
+        pinTicksSpanSetTime[i] = 0;
+      }
     }
   }
 
@@ -288,9 +299,9 @@ void loop() {
     Serial.println("client disonnected");
   }
 
-  if (checkTickEnds())
+  if (checkIfTicksJustEnded())
   {
-    //sendControlsHtml(client);
+    sendControlsHtml(client);
   }
 
   server.stop();
