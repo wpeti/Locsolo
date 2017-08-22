@@ -139,6 +139,7 @@ void setup() {
 
 void sendControlsHtml(WiFiClient client)
 {
+  unsigned long subResult = 0;
   // send a standard http response header
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: text/html");
@@ -165,11 +166,10 @@ void sendControlsHtml(WiFiClient client)
     if (sensorReading)
     {
       client.print("\">Abort</button>");
-      /*
          client.print(" Remaining time: ");
-         client.print("12");
+         subResult = pinTicksSpanSetTime[i] + pinTicksSpan[i] - millis();
+         client.print((double) subResult/60000);
          client.print(" minute(s).");
-      */
     }
     else if (!sensorReading)
     {
@@ -189,15 +189,24 @@ void reactOnClientResponse(String postResp, String clientResp, WiFiClient client
   if (postResp.indexOf("pinNbr=") >= 0)
   {
     //parse pin number to change
-    String substr = postResp.substring(postResp.indexOf("pinNbr=") + 7);
-    Serial.print("Substr value: ");
-    Serial.println(substr);
-    int pinNumber = substr.toInt();
+    String nbrSubstr = postResp.substring(postResp.indexOf("pinNbr=") + 7, postResp.indexOf("&"));
+    Serial.print("nbrSubstr value: ");
+    Serial.println(nbrSubstr);
+    int pinNumber = nbrSubstr.toInt();
     Serial.print("Pin number received: ");
     Serial.println(pinNumber);
 
-    //implement time span parsing
-
+   //parse pin span minutes
+    String spanSubstr = postResp.substring(postResp.indexOf("timeSpan=") + 9);
+    Serial.print("spanSubstr value: ");
+    Serial.println(spanSubstr);
+    int spanMinutes = spanSubstr.toInt();
+    Serial.print("Span minutes received: ");
+    Serial.println(spanMinutes);
+    Serial.print("Converted span minutes to ticks: "); 
+    unsigned long spanTicks = (unsigned long) spanMinutes*60000;
+    Serial.println(spanTicks);
+    
     //Change pin status
     if (digitalRead(pinNumber))
     {
@@ -205,7 +214,7 @@ void reactOnClientResponse(String postResp, String clientResp, WiFiClient client
     }
     else
     {
-      schedulePin(pinNumber, 10000);
+      if (spanTicks > 0) schedulePin(pinNumber, spanTicks);
     }
   }
 }
